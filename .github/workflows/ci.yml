@@ -1,0 +1,33 @@
+name: CI
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pip check
+      - run: python -m compileall -q app tests
+      - run: python -m pytest -q
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet
+      - run: docker compose up --build --wait --wait-timeout 120
+      - name: Smoke test
+        run: |
+          curl --fail http://127.0.0.1:8000/health
+          curl --fail -X POST http://127.0.0.1:8000/v1/evaluate -H 'Content-Type: application/json' -d '{"question":"Capital?","answer":"Paris","context":"Paris"}'
+          code=$(curl --silent --output /tmp/judge-response --write-out '%{http_code}' -X POST http://127.0.0.1:8000/v1/judge -H 'Content-Type: application/json' -d '{"question":"q","answer":"a","context":"c"}')
+          test "$code" = 503
+      - if: always()
+        run: docker compose logs && docker compose down --volumes
